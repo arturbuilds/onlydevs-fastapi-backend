@@ -10,6 +10,7 @@ load_dotenv()
 from database import get_async_db, engine, Base
 import models
 import schemas
+from ai_model import check_post_with_local_ai
 
 app = FastAPI()
 
@@ -49,6 +50,10 @@ async def create_post(post_data: schemas.PostCreate, db: AsyncSession = Depends(
     author_exists = result.scalars().first()
     if not author_exists:
         raise HTTPException(status_code=404, detail='Такой автор не найден. Сначала создайте автора!')
+    
+    is_valid = check_post_with_local_ai(title=post_data.title, content=post_data.secret_content)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail='Локальный ИИ заблокировал пост за спам!')
     
     new_post = models.Post(
         title=post_data.title,
@@ -117,10 +122,8 @@ async def get_post(post_id: int, user_id: int, db: AsyncSession = Depends(get_as
     cached_post = await redis_client.get(f'post_{post_id}')
 
     if cached_post:
-        print("🎰 ВАУ! ДАННЫЕ ВЗЯТЫ ИЗ ОБЛАЧНОГО REDIS!")
         post_dict = json.loads(cached_post)
     else:
-        print("💿 ОЙ, В РЕДИСЕ ПУСТО, ИДУ В СИНХРОННУЮ/АСИНХРОННУЮ БД SQLite...")
         query_post = select(models.Post).where(models.Post.id == post_id)
         result_post = await db.execute(query_post)
         post = result_post.scalars().first()
